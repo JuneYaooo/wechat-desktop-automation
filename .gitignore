@@ -1,0 +1,8 @@
+# Runtime state, screenshots, logs, and local editor files
+*.png
+*.log
+*.jsonl
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,4 @@
+interface:
+  display_name: "微信桌面自动化"
+  short_description: "监控、总结及按授权规则自动回复 Windows 微信"
+  default_prompt: "使用 Windows 微信桌面端，搜索指定联系人或群聊、读取和总结当前可见消息；在我明确给定作用域、规则、期限和次数上限后，可监控消息并自动回复或定时发送。"
