@@ -11,7 +11,7 @@ Use these defaults:
 - Preview each generated message programmatically and visually even when rule-authorized; per-message user confirmation may be omitted only when the final content fits the approved rule.
 - Keep the script cooldown and the rule's stricter cap. Never treat either as guaranteed safe.
 - Avoid broad crawling, repeated marketing, automatic friend adding, rapid navigation, indefinite monitoring, and unbounded auto-replies.
-- Add friends only on the user's explicit current request: one contact, verified identity, default verification text, manual confirmation at each step; never batch, schedule, or rule-authorize friend adds.
+- Add or accept friends only on the user's explicit current request: one contact, verified identity, default verification text, manual confirmation at each step; never batch, schedule, or rule-authorize friend adds, and never re-process entries already marked added or expired.
 - Record rule ID, timestamp, action type, and result screenshot without storing message text in the audit log.
 - Prefer an official WeCom/WeChat Open Platform interface for sustained business workflows.
 

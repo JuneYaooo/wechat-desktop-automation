@@ -1,6 +1,6 @@
 ---
 name: wechat-desktop-automation
-description: Control and monitor the logged-in Windows WeChat desktop client through visible mouse, keyboard, and window-capture operations. Use when the user asks to search/open a contact or group, inspect or summarize visible messages, monitor a specified chat for bounded periods, draft or send a message, message a contact or add a friend on an explicit one-off request, automatically reply under a user-approved rule, perform a scheduled send, capture WeChat, or recover stuck input. Support low-frequency manual actions and narrowly scoped pre-authorized rules; do not use for unsolicited marketing, broad contact crawling, automatic friend adding, deceptive messaging, or unbounded mass sending.
+description: Control and monitor the logged-in Windows WeChat desktop client through visible mouse, keyboard, and window-capture operations. Use when the user asks to search/open a contact or group, inspect or summarize visible messages, monitor a specified chat for bounded periods, draft or send a message, message a contact, add a friend, or accept an incoming friend request on an explicit one-off request, automatically reply under a user-approved rule, perform a scheduled send, capture WeChat, or recover stuck input. Support low-frequency manual actions and narrowly scoped pre-authorized rules; do not use for unsolicited marketing, broad contact crawling, automatic friend adding, deceptive messaging, or unbounded mass sending.
 ---
 
 # WeChat Desktop Automation
@@ -75,6 +75,17 @@ Validated WeChat 4.x friend-add flow (verify every step with `screen` or the com
 5. Only when the user asked for a greeting and the chat is open: `draft`, verify the preview, `send -ConfirmSend SEND`.
 
 If the card already shows chat/voice/video buttons, the person is already a contact — say so instead of adding again.
+
+### Accepting an incoming friend request
+
+Only on the user's explicit current request, and only the exact request they name — one per turn:
+
+1. `click` the contacts (通讯录) tab icon in the left rail, then the 新朋友 (New Friends) row at the top of the contacts list. Both sit inside the main window; verify each step with the returned `capture` before clicking on.
+2. Pending requests sort to the top of the list and carry an 接受 / 添加到通讯录 button. Entries marked 已添加 (added) or 已过期 (expired) are finished — never re-add, re-accept, or re-send to them.
+3. If no pending request exists, stop and report that; never simulate or test against a processed entry.
+4. `click` 接受 on the named request. A confirmation dialog opens (use `screen` when it renders outside the main window); keep the default remark and settings, then `click` 确定.
+5. After acceptance WeChat opens or offers the new chat. If the user asked for a greeting, follow the manual send flow: `draft`, verify the preview, `send -ConfirmSend SEND`.
+6. If the request the user named cannot be found, or several requests are pending and the target is ambiguous, stop and ask.
 
 Capture the current conversation:
 
