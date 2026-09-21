@@ -2,6 +2,8 @@
 
 Obtain explicit user approval for every required field before enabling automatic replies, scheduled sends, monitoring, or recurring summaries.
 
+Rules may only authorize `auto_reply`, `scheduled_send`, and `monitor_summary` for an already-open chat. Contact-level operations — friend requests, first greetings, searching out new contacts — are never rule-authorizable; each one needs the user's explicit current request and manual step-by-step confirmation.
+
 ## Required fields
 
 ```yaml

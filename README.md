@@ -190,8 +190,11 @@ $script = "$env:USERPROFILE\.codex\skills\wechat-desktop-automation\scripts\wech
 | 操作 | 示例 |
 | --- | --- |
 | 检查微信窗口 | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command status` |
-| 搜索并打开会话 | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command open -Query "June"` |
+| 搜索（全屏截图，含下拉弹窗） | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command search -Query "June"` |
+| 打开会话（按截图坐标点选结果） | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command open -Query "June" -ClickX 1021 -ClickY 326` |
 | 截取当前窗口 | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command capture` |
+| 截取全屏（含弹窗对话框） | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command screen` |
+| 点击微信窗口内指定点（带审计） | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command click -ClickX 640 -ClickY 367 -Label "add-to-contacts"` |
 | 填写草稿 | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command draft -Message "你好"` |
 | 手动确认发送 | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command send -ConfirmSend SEND` |
 | 规则授权发送 | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command send -AuthorizationId "rule-id"` |
@@ -199,6 +202,24 @@ $script = "$env:USERPROFILE\.codex\skills\wechat-desktop-automation\scripts\wech
 | 释放输入状态 | `powershell -NoProfile -ExecutionPolicy Bypass -File $script -Command release` |
 
 不要绕过草稿步骤直接执行发送。`AuthorizationId` 必须对应用户实际批准且仍然有效的规则。
+
+## 微信 4.x 搜索弹窗说明
+
+微信 4.x 的搜索结果是独立弹窗，`capture` 这类窗口截图截不到它。因此 `search` 和 `screen` 输出**全屏截图**：先读图找到唯一匹配的结果行，记下像素坐标，再用 `open -ClickX -ClickY`（打开会话）或 `click -ClickX -ClickY`（弹窗内按钮，如加好友）点选。不传坐标直接调用 `open` 会故意报错——旧版按固定偏移盲点在 4.x 上会误触“搜一搜”网页面板。
+
+`click` 只允许点击可见微信窗口内的坐标，点在其他应用上会直接拒绝；所有 `click` 操作都会写入审计日志。
+
+## 手动加好友
+
+仅限用户明确提出的单次请求，逐图核验、一次一个联系人：
+
+1. 搜索微信号，全屏截图中找到“网络查找微信号：<id>”。
+2. `click` 该行打开“添加朋友”名片，核对微信号与地区。
+3. `click` “添加到通讯录”，验证消息保留默认内容，`click` “确定”。
+4. 对方通讯录已有本机账号时申请立即生效，名片出现“发消息”；否则进入等待验证，本轮结束，不发送任何后续消息。
+5. 用户要求打招呼且会话已打开时，按普通发送流程 draft → 预览 → send。
+
+不加批量好友、不定时加好友、不代写验证消息；好友申请发出后未通过时不重试。
 
 ## 风险和使用边界
 

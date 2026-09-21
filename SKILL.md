@@ -1,6 +1,6 @@
 ---
 name: wechat-desktop-automation
-description: Control and monitor the logged-in Windows WeChat desktop client through visible mouse, keyboard, and window-capture operations. Use when the user asks to search/open a contact or group, inspect or summarize visible messages, monitor a specified chat for bounded periods, draft or send a message, automatically reply under a user-approved rule, perform a scheduled send, capture WeChat, or recover stuck input. Support low-frequency manual actions and narrowly scoped pre-authorized rules; do not use for unsolicited marketing, broad contact crawling, automatic friend adding, deceptive messaging, or unbounded mass sending.
+description: Control and monitor the logged-in Windows WeChat desktop client through visible mouse, keyboard, and window-capture operations. Use when the user asks to search/open a contact or group, inspect or summarize visible messages, monitor a specified chat for bounded periods, draft or send a message, message a contact or add a friend on an explicit one-off request, automatically reply under a user-approved rule, perform a scheduled send, capture WeChat, or recover stuck input. Support low-frequency manual actions and narrowly scoped pre-authorized rules; do not use for unsolicited marketing, broad contact crawling, automatic friend adding, deceptive messaging, or unbounded mass sending.
 ---
 
 # WeChat Desktop Automation
@@ -34,13 +34,47 @@ Check the client:
 powershell -NoProfile -ExecutionPolicy Bypass -File <skill-dir>\scripts\wechat_desktop.ps1 -Command status
 ```
 
-Search/open an exact conversation:
+Search for an exact conversation:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File <skill-dir>\scripts\wechat_desktop.ps1 -Command open -Query "init FDE"
+powershell -NoProfile -ExecutionPolicy Bypass -File <skill-dir>\scripts\wechat_desktop.ps1 -Command search -Query "init FDE"
 ```
 
-Inspect the returned chat screenshot and verify the title before drafting, monitoring, or summarizing. If results are ambiguous, ask the user.
+On WeChat 4.x the result dropdown is a **separate popup window** that window captures cannot see, so `search` captures the full screen. Inspect the screenshot, identify the exact result row, and note its pixel position.
+
+Open the conversation by clicking that row:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File <skill-dir>\scripts\wechat_desktop.ps1 -Command open -Query "init FDE" -ClickX 1021 -ClickY 326
+```
+
+`open` re-enters the query and clicks the coordinate you picked, so the same result row is hit. Inspect the returned chat screenshot and verify the title before drafting, monitoring, or summarizing. If results are ambiguous, ask the user. Calling `open` without `-ClickX/-ClickY` fails on purpose: the legacy blind click at a fixed offset lands on the “搜一搜” web panel.
+
+Capture any popup dialogs or panels that sit outside the main window:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File <skill-dir>\scripts\wechat_desktop.ps1 -Command screen
+```
+
+Click an audited point inside a visible WeChat window (never another application; the command refuses otherwise):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File <skill-dir>\scripts\wechat_desktop.ps1 -Command click -ClickX 640 -ClickY 367 -Label "add-to-contacts"
+```
+
+## Contacts and Friend Requests
+
+Only on the user's explicit current request, one contact at a time: searching a contact, opening their chat, adding a friend, or sending a first greeting. Never automate, batch, or schedule contact-level operations; they are outside rule authorization.
+
+Validated WeChat 4.x friend-add flow (verify every step with `screen` or the command's returned screenshot before the next click):
+
+1. `search -Query "<wechat-id>"` and locate the “网络查找微信号：<id>” row in the full-screen capture.
+2. `click` that row; the “添加朋友” profile card opens. Verify the WeChat ID and region match what the user asked for.
+3. `click` “添加到通讯录”; the request dialog appears. Keep the default verification text (the local account's own intro); do not write one on the user's behalf.
+4. `click` “确定”. If the other party already has this account in their contacts, the request is accepted immediately and the card switches to “发消息”; otherwise the request stays pending — stop there and send nothing.
+5. Only when the user asked for a greeting and the chat is open: `draft`, verify the preview, `send -ConfirmSend SEND`.
+
+If the card already shows chat/voice/video buttons, the person is already a contact — say so instead of adding again.
 
 Capture the current conversation:
 
@@ -127,4 +161,4 @@ Take a fresh capture and continue only when the interface is stable.
 
 ## Calibration
 
-Coordinates were validated on WeChat 4.1.x and are relative to the detected window. After a client layout change, test `status`, `open`, `capture`, and `draft` before any send. Monitoring relies on window pixels and cannot guarantee access to messages outside the visible viewport.
+Coordinates were validated on WeChat 4.1.x and are relative to the detected window; `search`/`screen`/`click` screenshots are full-screen captures whose pixels map 1:1 to `-ClickX/-ClickY`. After a client layout change, test `status`, `search`, `open` with coordinates, `capture`, and `draft` before any send. Monitoring relies on window pixels and cannot guarantee access to messages outside the visible viewport.

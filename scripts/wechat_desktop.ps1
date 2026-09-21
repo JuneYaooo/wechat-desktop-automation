@@ -1,12 +1,15 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('status', 'search', 'open', 'capture', 'watch', 'draft', 'send', 'release')]
+    [ValidateSet('status', 'search', 'open', 'capture', 'screen', 'click', 'watch', 'draft', 'send', 'release')]
     [string]$Command,
 
     [string]$Query,
     [string]$Message,
     [string]$ConfirmSend,
     [string]$AuthorizationId,
+    [string]$ClickX,
+    [string]$ClickY,
+    [string]$Label,
     [ValidateRange(10, 3600)]
     [int]$WatchSeconds = 300,
     [ValidateRange(5, 300)]
@@ -48,6 +51,7 @@ public static class WeChatNative {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
 }
 '@
 
@@ -92,6 +96,15 @@ function Get-WeChatWindow {
     return $preferred
 }
 
+function Test-SameProcessWindow([IntPtr]$ReferenceHandle, [IntPtr]$ForegroundHandle) {
+    if ($ReferenceHandle -eq $ForegroundHandle) { return $true }
+    [uint32]$referencePid = 0
+    [void][WeChatNative]::GetWindowThreadProcessId($ReferenceHandle, [ref]$referencePid)
+    [uint32]$foregroundPid = 0
+    [void][WeChatNative]::GetWindowThreadProcessId($ForegroundHandle, [ref]$foregroundPid)
+    return ($referencePid -ne 0 -and $referencePid -eq $foregroundPid)
+}
+
 function Set-WeChatForeground([IntPtr]$Handle) {
     [void][WeChatNative]::ShowWindow($Handle, 9)
     $foreground = [WeChatNative]::GetForegroundWindow()
@@ -116,8 +129,16 @@ function Set-WeChatForeground([IntPtr]$Handle) {
         if ($attachedForeground) { [void][WeChatNative]::AttachThreadInput($currentThread, $foregroundThread, $false) }
     }
     Start-Sleep -Milliseconds 700
-    if ([WeChatNative]::GetForegroundWindow() -ne $Handle) {
-        throw 'Could not activate the WeChat window.'
+    $activated = $false
+    foreach ($attempt in 1..3) {
+        if (Test-SameProcessWindow $Handle ([WeChatNative]::GetForegroundWindow())) { $activated = $true; break }
+        [void][WeChatNative]::BringWindowToTop($Handle)
+        [void][WeChatNative]::SetForegroundWindow($Handle)
+        [WeChatNative]::SwitchToThisWindow($Handle, $true)
+        Start-Sleep -Milliseconds 600
+    }
+    if (-not $activated) {
+        throw 'Could not activate the WeChat window. The user is likely interacting with another application; retry shortly or ask them to focus WeChat.'
     }
 }
 
@@ -184,6 +205,84 @@ function Save-WindowScreenshot([IntPtr]$Handle, [string]$Label) {
     return $path
 }
 
+function Get-VirtualScreenBounds {
+    $originX = [WeChatNative]::GetSystemMetrics(76)
+    $originY = [WeChatNative]::GetSystemMetrics(77)
+    $width = [WeChatNative]::GetSystemMetrics(78)
+    $height = [WeChatNative]::GetSystemMetrics(79)
+    if ($width -le 0 -or $height -le 0) { throw 'Could not read the virtual screen bounds.' }
+    [pscustomobject]@{ X = $originX; Y = $originY; Width = $width; Height = $height }
+}
+
+function Save-ScreenScreenshot([string]$Label) {
+    if (-not (Test-Path -LiteralPath $OutputDir)) { [void](New-Item -ItemType Directory -Path $OutputDir -Force) }
+    $bounds = Get-VirtualScreenBounds
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+    $path = Join-Path $OutputDir ("wechat-screen-$Label-$timestamp.png")
+    $bitmap = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bitmap.Size)
+        $bitmap.Save($path, [Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+    return $path
+}
+
+function Get-WeChatSurfaceWindows {
+    $surfaces = [System.Collections.Generic.List[object]]::new()
+    $callback = [WeChatNative+EnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+        if (-not [WeChatNative]::IsWindowVisible($hWnd)) { return $true }
+        [uint32]$processId = 0
+        [void][WeChatNative]::GetWindowThreadProcessId($hWnd, [ref]$processId)
+        if ($processId -eq 0) { return $true }
+        try {
+            $process = Get-Process -Id $processId -ErrorAction Stop
+            $name = $process.ProcessName
+        } catch { return $true }
+        if ($name -notin @('Weixin', 'WeChat', 'WeChatAppEx')) { return $true }
+        $rect = New-Object WeChatNative+RECT
+        if (-not [WeChatNative]::GetWindowRect($hWnd, [ref]$rect)) { return $true }
+        if (($rect.Right - $rect.Left) -le 0 -or ($rect.Bottom - $rect.Top) -le 0) { return $true }
+        $surfaces.Add([pscustomobject]@{ Handle = $hWnd; Rect = $rect })
+        return $true
+    }
+    [void][WeChatNative]::EnumWindows($callback, [IntPtr]::Zero)
+    return $surfaces
+}
+
+function Assert-ClickInsideWeChat([int]$PixelX, [int]$PixelY) {
+    $bounds = Get-VirtualScreenBounds
+    $screenX = $bounds.X + $PixelX
+    $screenY = $bounds.Y + $PixelY
+    foreach ($surface in (Get-WeChatSurfaceWindows)) {
+        $r = $surface.Rect
+        if ($screenX -ge $r.Left -and $screenX -lt $r.Right -and $screenY -ge $r.Top -and $screenY -lt $r.Bottom) {
+            return $surface
+        }
+    }
+    throw 'Target coordinates are outside every visible WeChat window; refusing to click another application.'
+}
+
+function Invoke-ScreenPixelClick([int]$PixelX, [int]$PixelY) {
+    [void](Assert-ClickInsideWeChat $PixelX $PixelY)
+    $bounds = Get-VirtualScreenBounds
+    Invoke-Click ($bounds.X + $PixelX) ($bounds.Y + $PixelY)
+}
+
+function Resolve-ClickPoint {
+    if ([string]::IsNullOrWhiteSpace($ClickX) -or [string]::IsNullOrWhiteSpace($ClickY)) { return $null }
+    try {
+        $x = [int]$ClickX
+        $y = [int]$ClickY
+    } catch { throw '-ClickX/-ClickY must be integer pixel positions.' }
+    if ($x -lt 0 -or $y -lt 0) { throw '-ClickX/-ClickY must be non-negative pixel positions.' }
+    [pscustomobject]@{ X = $x; Y = $y }
+}
+
 function Write-Audit([string]$Action, [string]$Mode, [string]$RuleId, [string]$Screenshot) {
     $record = [ordered]@{
         timestamp = (Get-Date).ToString('o')
@@ -226,6 +325,7 @@ $handle = [IntPtr]$window.Handle
 
 if ($Command -eq 'status') {
     $rect = Get-WindowRect $handle
+    $screen = Get-VirtualScreenBounds
     [pscustomobject]@{
         ok = $true
         command = 'status'
@@ -234,6 +334,7 @@ if ($Command -eq 'status') {
         title = $window.Title
         class_name = $window.ClassName
         rect = @($rect.Left, $rect.Top, $rect.Right, $rect.Bottom)
+        virtual_screen = @($screen.X, $screen.Y, $screen.Width, $screen.Height)
     } | ConvertTo-Json -Depth 3
     exit 0
 }
@@ -294,16 +395,55 @@ try {
             Invoke-CtrlA
             Start-Sleep -Milliseconds 150
             Send-UnicodeText $handle $Query
-            Start-Sleep -Milliseconds 1200
-            $searchPath = Save-WindowScreenshot $handle 'search'
+            Start-Sleep -Milliseconds 1500
+            $searchPath = Save-ScreenScreenshot 'search'
             if ($Command -eq 'search') {
-                [pscustomobject]@{ ok = $true; command = 'search'; query = $Query; screenshot = $searchPath } | ConvertTo-Json
+                [pscustomobject]@{
+                    ok = $true
+                    command = 'search'
+                    query = $Query
+                    screenshot = $searchPath
+                    note = 'WeChat 4.x shows search results in a separate popup window, visible only in this full-screen capture. Identify the exact result row, then run open again with -ClickX/-ClickY set to that row pixel position in this screenshot.'
+                } | ConvertTo-Json
             } else {
-                Invoke-Click ($rect.Left + 200) ($rect.Top + 170)
+                $clickPoint = Resolve-ClickPoint
+                if (-not $clickPoint) {
+                    throw 'WeChat 4.x renders search results in a separate popup, so blind-clicking a fixed offset mis-hits (it lands on the Sou-Yi-Sou web panel). Inspect the search screenshot first, then call open again with -ClickX and -ClickY pointing at the exact result row in that full-screen capture.'
+                }
+                Invoke-ScreenPixelClick $clickPoint.X $clickPoint.Y
                 Start-Sleep -Milliseconds 1000
                 $chatPath = Save-WindowScreenshot $handle 'opened-chat'
-                [pscustomobject]@{ ok = $true; command = 'open'; query = $Query; search_screenshot = $searchPath; chat_screenshot = $chatPath } | ConvertTo-Json
+                [pscustomobject]@{
+                    ok = $true
+                    command = 'open'
+                    query = $Query
+                    click = @($clickPoint.X, $clickPoint.Y)
+                    search_screenshot = $searchPath
+                    chat_screenshot = $chatPath
+                } | ConvertTo-Json
             }
+        }
+        'screen' {
+            $path = Save-ScreenScreenshot 'view'
+            [pscustomobject]@{ ok = $true; command = 'screen'; screenshot = $path } | ConvertTo-Json
+        }
+        'click' {
+            $clickPoint = Resolve-ClickPoint
+            if (-not $clickPoint) { throw 'click requires -ClickX and -ClickY (pixel positions in a full-screen capture).' }
+            if ([string]::IsNullOrWhiteSpace($Label)) { $Label = 'manual-click' }
+            Set-WeChatForeground $handle
+            [void](Assert-ClickInsideWeChat $clickPoint.X $clickPoint.Y)
+            Invoke-ScreenPixelClick $clickPoint.X $clickPoint.Y
+            Start-Sleep -Milliseconds 1200
+            $path = Save-ScreenScreenshot 'click'
+            Write-Audit 'click' 'manual' $Label $path
+            [pscustomobject]@{
+                ok = $true
+                command = 'click'
+                label = $Label
+                click = @($clickPoint.X, $clickPoint.Y)
+                screenshot = $path
+            } | ConvertTo-Json
         }
         'draft' {
             if ([string]::IsNullOrWhiteSpace($Message)) { throw '-Message is required for draft.' }
